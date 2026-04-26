@@ -1,4 +1,6 @@
+import io
 import time
+import wave
 from dataclasses import dataclass
 
 import numpy as np
@@ -25,16 +27,28 @@ class TTSEngine:
 
         print(f"[TTS] Loading Piper from {self.config.tts_model_path} ...")
         self._voice = PiperVoice.load(self.config.tts_model_path)
-        # Piper config exposes the output sample rate
         self._sample_rate = self._voice.config.sample_rate
         print(f"[TTS] Piper loaded (sample_rate={self._sample_rate}).")
 
     def synthesize(self, text: str) -> TTSResult:
         assert self._voice is not None, "Call load() first"
 
+        buf = io.BytesIO()
         t0 = time.perf_counter()
-        raw = b"".join(self._voice.synthesize_stream_raw(text))
+        with wave.open(buf, "wb") as wav_file:
+            # Pre-set headers so wav_file.close() never raises if synthesize() fails
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(self._sample_rate)
+            try:
+                self._voice.synthesize(text, wav_file)
+            except Exception as e:
+                print(f"[TTS] synthesize() failed: {e}")
         latency_s = time.perf_counter() - t0
+
+        buf.seek(0)
+        with wave.open(buf) as wav_file:
+            raw = wav_file.readframes(wav_file.getnframes())
 
         if not raw:
             return TTSResult(audio=np.zeros(0, dtype=np.float32),
