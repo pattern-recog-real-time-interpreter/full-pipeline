@@ -12,24 +12,31 @@ from .config import PipelineConfig
 
 
 def _fix_piper_phonemize_windows() -> None:
-    """Point piper-phonemize at its bundled espeak-ng DLL on Windows.
+    # Must be called at module import time — before piper or piper_phonemize is imported.
+    """Register piper-phonemize's espeak-ng DLL directory BEFORE the module is imported.
 
-    piper-phonemize ships its own espeak-ng DLL but doesn't register the
-    directory with Python's DLL loader (required since Python 3.8 on Windows).
-    Without this the phonemizer loads silently but returns empty results.
+    piper-phonemize ships its own espeak-ng DLL but doesn't add its own directory
+    to the DLL search path (required since Python 3.8 on Windows). The fix must run
+    before any import of piper_phonemize, so we use find_spec() which locates the
+    package without executing it.
     """
     if sys.platform != "win32":
         return
     try:
-        import piper_phonemize
-        phonemize_dir = os.path.dirname(piper_phonemize.__file__)
-        os.add_dll_directory(phonemize_dir)
-        if "ESPEAK_DATA_PATH" not in os.environ:
-            data_path = os.path.join(phonemize_dir, "espeak-ng-data")
-            if os.path.isdir(data_path):
-                os.environ["ESPEAK_DATA_PATH"] = data_path
+        import importlib.util
+        spec = importlib.util.find_spec("piper_phonemize")
+        if spec and spec.origin:
+            phonemize_dir = os.path.dirname(spec.origin)
+            os.add_dll_directory(phonemize_dir)
+            if "ESPEAK_DATA_PATH" not in os.environ:
+                data_path = os.path.join(phonemize_dir, "espeak-ng-data")
+                if os.path.isdir(data_path):
+                    os.environ["ESPEAK_DATA_PATH"] = data_path
     except Exception:
-        pass  # piper_phonemize not installed or already fixed
+        pass
+
+
+_fix_piper_phonemize_windows()  # run at import time, before piper is ever imported
 
 
 @dataclass
@@ -47,7 +54,6 @@ class TTSEngine:
         self._sample_rate: int = 22050
 
     def load(self) -> None:
-        _fix_piper_phonemize_windows()
         from piper import PiperVoice
 
         print(f"[TTS] Loading Piper from {self.config.tts_model_path} ...")
