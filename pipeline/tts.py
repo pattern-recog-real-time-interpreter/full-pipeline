@@ -1,6 +1,4 @@
-import io
 import time
-import wave
 from dataclasses import dataclass
 
 import numpy as np
@@ -34,23 +32,19 @@ class TTSEngine:
     def synthesize(self, text: str) -> TTSResult:
         assert self._voice is not None, "Call load() first"
 
-        buf = io.BytesIO()
         t0 = time.perf_counter()
-        with wave.open(buf, "wb") as wav_file:
-            self._voice.synthesize(text, wav_file)
+        raw = b"".join(self._voice.synthesize_stream_raw(text))
         latency_s = time.perf_counter() - t0
 
-        buf.seek(0)
-        with wave.open(buf) as wav_file:
-            n_frames = wav_file.getnframes()
-            sr = wav_file.getframerate()
-            raw = wav_file.readframes(n_frames)
+        if not raw:
+            return TTSResult(audio=np.zeros(0, dtype=np.float32),
+                             sample_rate=self._sample_rate, latency_s=latency_s, rtf=0.0)
 
         audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-        audio_duration_s = len(audio) / sr
+        audio_duration_s = len(audio) / self._sample_rate
         rtf = latency_s / audio_duration_s if audio_duration_s > 0 else 0.0
 
-        return TTSResult(audio=audio, sample_rate=sr, latency_s=latency_s, rtf=rtf)
+        return TTSResult(audio=audio, sample_rate=self._sample_rate, latency_s=latency_s, rtf=rtf)
 
     @property
     def sample_rate(self) -> int:
