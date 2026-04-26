@@ -1,3 +1,14 @@
+---
+title: Thai-English Voice Translation
+emoji: 🇹🇭
+colorFrom: blue
+colorTo: green
+sdk: gradio
+sdk_version: "4.0.0"
+app_file: app.py
+pinned: false
+---
+
 # Real-Time Thai → English Voice Translation Pipeline
 
 VAD → ASR → NMT → TTS pipeline that takes Thai speech and outputs English speech.
@@ -35,6 +46,23 @@ uv run python setup.py
 uv run python setup.py --asr-only   # Typhoon ASR (.nemo)
 uv run python setup.py --nmt-only   # NLLB-600M INT8 (CTranslate2)
 uv run python setup.py --tts-only   # Piper ONNX
+```
+
+---
+
+## Gradio UI
+
+```bash
+uv run app.py
+```
+
+Opens a browser at `http://localhost:7860`. Record Thai speech or upload a WAV file — get Thai transcription, English translation, and English audio back.
+
+To get a temporary public link (no deployment needed):
+
+```python
+# in app.py, change the last line to:
+demo.launch(share=True)
 ```
 
 ---
