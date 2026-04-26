@@ -1,5 +1,6 @@
 import io
 import time
+import traceback
 import wave
 from dataclasses import dataclass
 
@@ -42,8 +43,8 @@ class TTSEngine:
             wav_file.setframerate(self._sample_rate)
             try:
                 self._voice.synthesize(text, wav_file)
-            except Exception as e:
-                print(f"[TTS] synthesize() failed: {e}")
+            except Exception:
+                traceback.print_exc()
         latency_s = time.perf_counter() - t0
 
         buf.seek(0)
@@ -51,6 +52,7 @@ class TTSEngine:
             raw = wav_file.readframes(wav_file.getnframes())
 
         if not raw:
+            print(f"[TTS] synthesize() produced 0 bytes for text: {repr(text[:80])}")
             return TTSResult(audio=np.zeros(0, dtype=np.float32),
                              sample_rate=self._sample_rate, latency_s=latency_s, rtf=0.0)
 

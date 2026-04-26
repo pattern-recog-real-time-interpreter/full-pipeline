@@ -8,10 +8,18 @@ Hugging Face Spaces:
     Push this repo — Spaces picks up app.py automatically.
     Set SDK: gradio in README.md front-matter (see below).
 """
+import asyncio
 import os
+import sys
+
 import numpy as np
 import gradio as gr
 import librosa
+
+# Windows ProactorEventLoop throws ConnectionResetError on browser disconnect;
+# SelectorEventLoop handles it silently.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from pipeline import PipelineConfig, ThaiToEnglishPipeline
 
@@ -59,8 +67,9 @@ def translate(audio):
 
     audio_out = None
     if result.audio_output is not None and result.audio_output.size > 0:
-        # Gradio Audio output expects (sample_rate, numpy int16 or float32)
-        audio_out = (result.tts_sample_rate, result.audio_output)
+        # Gradio Audio expects (sample_rate, int16 numpy array)
+        pcm = (result.audio_output * 32767).clip(-32768, 32767).astype(np.int16)
+        audio_out = (result.tts_sample_rate, pcm)
 
     return result.thai_text, result.english_text, audio_out, latency_str
 
