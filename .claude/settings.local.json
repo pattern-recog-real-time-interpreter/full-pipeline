@@ -6,7 +6,8 @@
       "Bash(python3 -c \"import ctranslate2; print\\('ctranslate2 OK'\\)\")",
       "Bash(python3 -c \"import sounddevice; print\\('sounddevice OK'\\)\")",
       "Bash(python3 -c \"import pyaudio; print\\('pyaudio OK'\\)\")",
-      "Bash(python3 -c \"import piper; print\\('piper OK'\\)\")"
+      "Bash(python3 -c \"import piper; print\\('piper OK'\\)\")",
+      "Bash(uv run *)"
     ]
   }
 }
