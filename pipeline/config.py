@@ -10,8 +10,10 @@ class PipelineConfig:
     nmt_model_dir: str = field(default_factory=lambda: os.path.join("models", "nllb-600m-int8"))
     nmt_tokenizer_name: str = "facebook/nllb-200-distilled-600M"
 
-    # TTS
-    tts_model_path: str = field(default_factory=lambda: os.path.join("models", "piper", "en_US-lessac-medium.onnx"))
+    # TTS — Kokoro-82M ONNX
+    tts_model_path: str = field(default_factory=lambda: os.path.join("models", "kokoro", "kokoro-v1.0.onnx"))
+    tts_voices_path: str = field(default_factory=lambda: os.path.join("models", "kokoro", "voices.bin"))
+    tts_voice: str = "af_heart"  # American English female; see kokoro-onnx docs for options
 
     # ASR
     asr_model_path: str = field(default_factory=lambda: os.path.join("models", "typhoon-asr.nemo"))

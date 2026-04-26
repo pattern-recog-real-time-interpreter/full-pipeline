@@ -61,33 +61,26 @@ def setup_nmt():
 
 
 def setup_tts():
-    """Download Piper ONNX model files."""
-    piper_dir = os.path.join("models", "piper")
-    onnx_path = os.path.join(piper_dir, "en_US-lessac-medium.onnx")
-    json_path = os.path.join(piper_dir, "en_US-lessac-medium.onnx.json")
+    """Download Kokoro-82M ONNX model files from GitHub releases."""
+    import urllib.request
 
-    if os.path.exists(onnx_path) and os.path.exists(json_path):
-        print(f"[TTS] Already exists: {piper_dir}")
+    kokoro_dir = os.path.join("models", "kokoro")
+    onnx_path = os.path.join(kokoro_dir, "kokoro-v1.0.onnx")
+    voices_path = os.path.join(kokoro_dir, "voices.bin")
+
+    if os.path.exists(onnx_path) and os.path.exists(voices_path):
+        print(f"[TTS] Already exists: {kokoro_dir}")
         return
 
-    print("[TTS] Downloading Piper en_US-lessac-medium from HuggingFace ...")
-    from huggingface_hub import hf_hub_download
+    os.makedirs(kokoro_dir, exist_ok=True)
+    base_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 
-    os.makedirs(piper_dir, exist_ok=True)
-    base = "en/en_US/lessac/medium"
-    for fname in ["en_US-lessac-medium.onnx", "en_US-lessac-medium.onnx.json"]:
-        hf_hub_download(
-            repo_id="rhasspy/piper-voices",
-            filename=f"{base}/{fname}",
-            local_dir=piper_dir,
-            local_dir_use_symlinks=False,
-        )
-        # hf_hub_download nests by filename path — move to flat piper_dir
-        nested = os.path.join(piper_dir, base, fname)
-        dest = os.path.join(piper_dir, fname)
-        if os.path.exists(nested) and not os.path.exists(dest):
-            os.rename(nested, dest)
-    print(f"[TTS] Saved to {piper_dir}")
+    for fname, dest in [("kokoro-v1.0.onnx", onnx_path), ("voices.bin", voices_path)]:
+        if not os.path.exists(dest):
+            print(f"[TTS] Downloading {fname} ...")
+            urllib.request.urlretrieve(f"{base_url}/{fname}", dest)
+
+    print(f"[TTS] Saved to {kokoro_dir}")
 
 
 def main():
