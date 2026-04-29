@@ -6,10 +6,9 @@ Local:
 
 Hugging Face Spaces:
     Push this repo — Spaces picks up app.py automatically.
-    Set SDK: gradio in README.md front-matter (see below).
+    Set SDK: gradio in README.md front-matter.
 """
 import asyncio
-import os
 import sys
 
 import numpy as np
@@ -22,56 +21,72 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from pipeline import PipelineConfig, ThaiToEnglishPipeline
+from pipeline.vad import VADSegmenter
 
 # ---------------------------------------------------------------------------
-# Load pipeline once at startup
+# Load pipeline + VAD once at startup
 # ---------------------------------------------------------------------------
 config = PipelineConfig(device="cpu")
 pipeline = ThaiToEnglishPipeline(config)
+vad = VADSegmenter(config)
 pipeline.load()
 
 
 # ---------------------------------------------------------------------------
-# Inference function
+# Helpers
 # ---------------------------------------------------------------------------
-def translate(audio):
-    """Called by Gradio with (sample_rate, numpy_array) or None."""
-    if audio is None:
-        return "", "", None, ""
-
-    sr, data = audio
-
-    # Gradio may give int16 or float32; normalise to float32 [-1, 1]
+def _to_16k_float32(sr: int, data: np.ndarray) -> np.ndarray:
     if data.dtype == np.int16:
         data = data.astype(np.float32) / 32768.0
     elif data.dtype != np.float32:
         data = data.astype(np.float32)
-
-    # Mono
     if data.ndim > 1:
         data = data.mean(axis=1)
-
-    # Resample to 16 kHz if needed
     if sr != config.sample_rate:
         data = librosa.resample(data, orig_sr=sr, target_sr=config.sample_rate)
+    return data
 
-    result = pipeline.process_segment(data)
 
+def _run_pipeline(segment: np.ndarray):
+    result = pipeline.process_segment(segment)
     latency_str = (
-        f"VAD {result.vad_latency_s:.2f}s | "
-        f"ASR {result.asr_latency_s:.2f}s | "
-        f"NMT {result.nmt_latency_s:.2f}s | "
-        f"TTS {result.tts_latency_s:.2f}s | "
-        f"Total {result.total_latency_s:.2f}s (RTF {result.end_to_end_rtf:.2f}×)"
+        f"VAD {result.vad_latency_s:.2f}s | ASR {result.asr_latency_s:.2f}s | "
+        f"NMT {result.nmt_latency_s:.2f}s | TTS {result.tts_latency_s:.2f}s | "
+        f"Total {result.total_latency_s:.2f}s  (RTF {result.end_to_end_rtf:.2f}×)"
     )
-
     audio_out = None
     if result.audio_output is not None and result.audio_output.size > 0:
-        # Gradio Audio expects (sample_rate, int16 numpy array)
         pcm = (result.audio_output * 32767).clip(-32768, 32767).astype(np.int16)
         audio_out = (result.tts_sample_rate, pcm)
-
     return result.thai_text, result.english_text, audio_out, latency_str
+
+
+# ---------------------------------------------------------------------------
+# Event handlers
+# ---------------------------------------------------------------------------
+def on_start():
+    vad.reset()
+    return "Listening…"
+
+
+def process_chunk(audio):
+    """Called by Gradio for every streaming audio chunk."""
+    if audio is None:
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
+    sr, data = audio
+    data = _to_16k_float32(sr, data)
+    segment = vad.push_chunk(data)
+    if segment is None:
+        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
+    return _run_pipeline(segment)
+
+
+def on_stop():
+    """Flush any remaining audio when the user stops recording."""
+    segment = vad.flush()
+    if segment is not None and len(segment) > 0:
+        return _run_pipeline(segment)
+    return gr.skip(), gr.skip(), gr.skip(), gr.skip()
 
 
 # ---------------------------------------------------------------------------
@@ -80,38 +95,53 @@ def translate(audio):
 with gr.Blocks(title="Thai → English Voice Translation") as demo:
     gr.Markdown(
         """
-        # 🇹🇭 Thai → English Voice Translation
-        **Pipeline:** VAD → Typhoon ASR → NLLB-600M NMT → Piper TTS
+        # Thai → English Voice Translation
+        **Pipeline:** Silero VAD → Typhoon ASR → NLLB-600M NMT → Kokoro TTS
 
-        Record Thai speech or upload a WAV file — get English text and speech back.
+        Click the microphone to start recording. Speak Thai, then pause —
+        the translation will appear automatically. Each pause triggers one full pipeline run.
         """
     )
 
     with gr.Row():
         with gr.Column():
             audio_input = gr.Audio(
-                sources=["microphone", "upload"],
+                sources=["microphone"],
+                streaming=True,
                 type="numpy",
                 label="Thai Speech Input",
             )
-            submit_btn = gr.Button("Translate", variant="primary")
+            status_out = gr.Textbox(
+                label="Status",
+                value="Click the mic to start",
+                interactive=False,
+                lines=1,
+            )
 
         with gr.Column():
             thai_out = gr.Textbox(label="Thai Transcription (ASR)", lines=3)
             english_out = gr.Textbox(label="English Translation (NMT)", lines=3)
-            audio_out = gr.Audio(label="English Speech (TTS)", type="numpy")
+            audio_out = gr.Audio(
+                label="English Speech (TTS)",
+                type="numpy",
+                autoplay=True,
+            )
             latency_out = gr.Textbox(label="Latency", lines=1, interactive=False)
 
-    submit_btn.click(
-        fn=translate,
+    audio_input.start_recording(
+        fn=on_start,
+        outputs=status_out,
+    )
+    audio_input.stream(
+        fn=process_chunk,
         inputs=audio_input,
         outputs=[thai_out, english_out, audio_out, latency_out],
     )
-
-    gr.Examples(
-        examples=[["demo/sample_thai.wav"]] if os.path.exists("demo/sample_thai.wav") else [],
-        inputs=audio_input,
+    audio_input.stop_recording(
+        fn=on_stop,
+        outputs=[thai_out, english_out, audio_out, latency_out],
     )
+
 
 if __name__ == "__main__":
     demo.launch()

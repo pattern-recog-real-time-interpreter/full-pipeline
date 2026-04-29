@@ -86,6 +86,12 @@ class VADSegmenter:
             return self._flush()
         return None
 
+    def reset(self) -> None:
+        """Clear streaming state — call when starting a new recording session."""
+        self._buffer.clear()
+        self._buffer_samples = 0
+        self._silence_samples = 0
+
     def flush(self) -> Optional[np.ndarray]:
         """Force-return whatever is buffered (e.g., on shutdown)."""
         if self._buffer_samples == 0:
