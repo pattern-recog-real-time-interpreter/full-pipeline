@@ -12,7 +12,7 @@ class PipelineConfig:
 
     # TTS — Kokoro-82M ONNX
     tts_model_path: str = field(default_factory=lambda: os.path.join("models", "kokoro", "kokoro-v1.0.onnx"))
-    tts_voices_path: str = field(default_factory=lambda: os.path.join("models", "kokoro", "voices.bin"))
+    tts_voices_path: str = field(default_factory=lambda: os.path.join("models", "kokoro", "voices-v1.0.bin"))
     tts_voice: str = "af_heart"  # American English female; see kokoro-onnx docs for options
 
     # ASR

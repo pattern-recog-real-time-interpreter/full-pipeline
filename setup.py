@@ -61,25 +61,26 @@ def setup_nmt():
 
 
 def setup_tts():
-    """Download Kokoro-82M INT8 ONNX model files from onnx-community on HuggingFace."""
-    from huggingface_hub import hf_hub_download
+    """Download Kokoro-82M ONNX model files from GitHub releases."""
+    import urllib.request
 
     kokoro_dir = os.path.join("models", "kokoro")
-    onnx_path = os.path.join(kokoro_dir, "model_q8.onnx")
-    voices_path = os.path.join(kokoro_dir, "voices.bin")
+    onnx_path = os.path.join(kokoro_dir, "kokoro-v1.0.onnx")
+    voices_path = os.path.join(kokoro_dir, "voices-v1.0.bin")
 
     if os.path.exists(onnx_path) and os.path.exists(voices_path):
         print(f"[TTS] Already exists: {kokoro_dir}")
         return
 
     os.makedirs(kokoro_dir, exist_ok=True)
-    print("[TTS] Downloading Kokoro-82M INT8 from onnx-community/Kokoro-82M-v1.0 ...")
-    for fname in ["model_q8.onnx", "voices.bin"]:
-        hf_hub_download(
-            repo_id="onnx-community/Kokoro-82M-v1.0",
-            filename=fname,
-            local_dir=kokoro_dir,
-        )
+    base_url = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+    for fname, dest in [("kokoro-v1.0.onnx", onnx_path), ("voices-v1.0.bin", voices_path)]:
+        if os.path.exists(dest):
+            print(f"[TTS] Already exists: {dest}")
+            continue
+        url = f"{base_url}/{fname}"
+        print(f"[TTS] Downloading {fname} ...")
+        urllib.request.urlretrieve(url, dest)
     print(f"[TTS] Saved to {kokoro_dir}")
 
 
