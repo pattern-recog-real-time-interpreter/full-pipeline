@@ -8,6 +8,7 @@ Hugging Face Spaces:
     Push this repo — Spaces picks up app.py automatically.
     Set SDK: gradio in README.md front-matter.
 """
+import argparse
 import asyncio
 import sys
 
@@ -26,7 +27,12 @@ from pipeline.vad import VADSegmenter
 # ---------------------------------------------------------------------------
 # Load pipeline + VAD once at startup
 # ---------------------------------------------------------------------------
-config = PipelineConfig(device="cpu")
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+_parser.add_argument("--share", action="store_true", help="Gradio public link")
+_args, _unknown = _parser.parse_known_args()
+
+config = PipelineConfig(device=_args.device)
 pipeline = ThaiToEnglishPipeline(config)
 vad = VADSegmenter(config)
 pipeline.load()
@@ -144,4 +150,4 @@ with gr.Blocks(title="Thai → English Voice Translation") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=_args.share)
