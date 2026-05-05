@@ -1,23 +1,25 @@
 """
-Black-box E2E evaluation: Thai audio → pipeline → English audio.
+Black-box E2E evaluation: Thai audio -> pipeline -> English audio.
 
-Treats the pipeline as a black box. Evaluates output audio only — no
+Treats the pipeline as a black box. Evaluates output audio only -- no
 intermediate text (ASR output, NMT output) is used for scoring.
 
 Dataset
 -------
-  FLEURS (google/fleurs) — real human Thai speech aligned with English text.
-    th_th  →  Thai audio input
-    en_us  →  English transcription (reference text for BLEU/chrF)
+  FLEURS (google/fleurs) -- real human Thai speech aligned with English text.
+    th_th  ->  Thai audio input
+    en_us  ->  English transcription (reference text for BLEU/chrF)
 
 Metrics
 -------
-  BLEU + chrF   : Whisper transcribes output audio → compare to FLEURS English reference
+  BLEU + chrF   : Whisper transcribes output audio -> compare to FLEURS English reference
+  UTMOS         : automated MOS (speech naturalness) on output audio, scale 1-5
   E2E latency   : total wall time per sample (mean / p50 / p95)
   RTF           : total_latency / input_audio_duration
 
 Install eval deps:
     pip install datasets sacrebleu openai-whisper
+    (UTMOS loads via torch.hub automatically on first run)
 
 Usage:
     uv run python eval/e2e_eval.py [--n 100] [--device cpu] [--whisper-model small]
@@ -35,10 +37,31 @@ import librosa
 import numpy as np
 import sacrebleu
 import soundfile as sf
+import torch
 import whisper
 from datasets import load_dataset
 
 from pipeline import PipelineConfig, ThaiToEnglishPipeline
+
+
+def load_utmos():
+    """Load UTMOS22 strong predictor via torch.hub (auto-downloads on first call)."""
+    print("[eval] Loading UTMOS22 ...")
+    predictor = torch.hub.load(
+        "tarepan/SpeechMOS:v1.2.0", "utmos22_strong", trust_repo=True
+    )
+    predictor.eval()
+    return predictor
+
+
+def compute_utmos(predictor, audio: np.ndarray, sr: int) -> float:
+    """Predict MOS for audio (1-5 scale). Resamples to 16 kHz internally."""
+    if sr != 16000:
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
+    wav = torch.tensor(audio).unsqueeze(0)  # (1, T)
+    with torch.no_grad():
+        score = predictor(wav, 16000)
+    return float(score.mean())
 
 
 def transcribe_audio(asr_model, audio: np.ndarray, sr: int) -> str:
@@ -79,6 +102,8 @@ def main():
     print(f"[eval] Loading Whisper {args.whisper_model} ...")
     asr = whisper.load_model(args.whisper_model)
 
+    utmos = load_utmos()
+
     print("[eval] Fetching FLEURS th_th / en_us test splits ...")
     ds_th = load_dataset("google/fleurs", "th_th", split="test", trust_remote_code=True)
     ds_en = load_dataset("google/fleurs", "en_us", split="test", trust_remote_code=True)
@@ -108,22 +133,25 @@ def main():
         result = pipe.process_segment(audio_in)
 
         if result.audio_output is None or result.audio_output.size == 0:
-            print("  skip — pipeline produced no audio output")
+            print("  skip -- pipeline produced no audio output")
             continue
 
         transcript = transcribe_audio(asr, result.audio_output, result.tts_sample_rate)
+        mos = compute_utmos(utmos, result.audio_output, result.tts_sample_rate)
 
         transcripts.append(transcript)
         references.append(en_ref_text)
 
         print(f"  Whisper : {transcript}")
         print(f"  Ref     : {en_ref_text}")
-        print(f"  RTF     : {result.end_to_end_rtf:.2f}×  total={result.total_latency_s:.2f}s")
+        print(f"  UTMOS   : {mos:.3f}")
+        print(f"  RTF     : {result.end_to_end_rtf:.2f}x  total={result.total_latency_s:.2f}s")
 
         records.append({
             "id":        row["id"],
             "en_ref":    en_ref_text,
             "en_hyp":    transcript,
+            "utmos":     mos,
             "audio_dur": result.audio_duration_s,
             "total_s":   result.total_latency_s,
             "rtf":       result.end_to_end_rtf,
@@ -138,10 +166,11 @@ def main():
         print("No samples produced audio output.")
         return
 
-    bleu = sacrebleu.corpus_bleu(transcripts, [references])
-    chrf = sacrebleu.corpus_chrf(transcripts, [references])
-    lat  = latency_stats([r["total_s"] for r in records])
-    rtf  = latency_stats([r["rtf"]     for r in records])
+    bleu     = sacrebleu.corpus_bleu(transcripts, [references])
+    chrf     = sacrebleu.corpus_chrf(transcripts, [references])
+    avg_mos  = statistics.mean(r["utmos"] for r in records)
+    lat      = latency_stats([r["total_s"] for r in records])
+    rtf      = latency_stats([r["rtf"]     for r in records])
 
     print("\n" + "=" * 60)
     print(f"Black-box E2E evaluation  (n={actual_n}, device={args.device})")
@@ -151,24 +180,28 @@ def main():
     print(f"  BLEU  : {bleu.score:.2f}")
     print(f"  chrF  : {chrf.score:.2f}")
     print()
+    print("Speech quality  (UTMOS22 on output audio, 1-5 scale)")
+    print(f"  UTMOS : {avg_mos:.3f}")
+    print()
     print(f"  {'':8}  {'mean':>8}  {'p50':>8}  {'p95':>8}")
     print("-" * 42)
     print(f"  {'Total':8}  {lat['mean']:>7.3f}s  {lat['p50']:>7.3f}s  {lat['p95']:>7.3f}s")
-    print(f"  {'RTF':8}  {rtf['mean']:>7.3f}×  {rtf['p50']:>7.3f}×  {rtf['p95']:>7.3f}×")
+    print(f"  {'RTF':8}  {rtf['mean']:>7.3f}x  {rtf['p50']:>7.3f}x  {rtf['p95']:>7.3f}x")
     print("=" * 60)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump({
-            "n":       actual_n,
-            "device":  args.device,
-            "bleu":    bleu.score,
-            "chrf":    chrf.score,
-            "latency": {"mean": lat["mean"], "p50": lat["p50"], "p95": lat["p95"]},
-            "rtf":     {"mean": rtf["mean"], "p50": rtf["p50"], "p95": rtf["p95"]},
-            "samples": records,
+            "n":        actual_n,
+            "device":   args.device,
+            "bleu":     bleu.score,
+            "chrf":     chrf.score,
+            "avg_utmos": avg_mos,
+            "latency":  {"mean": lat["mean"], "p50": lat["p50"], "p95": lat["p95"]},
+            "rtf":      {"mean": rtf["mean"], "p50": rtf["p50"], "p95": rtf["p95"]},
+            "samples":  records,
         }, f, ensure_ascii=False, indent=2)
-    print(f"\nPer-sample results → {args.out}")
+    print(f"\nPer-sample results -> {args.out}")
 
 
 if __name__ == "__main__":

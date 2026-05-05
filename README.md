@@ -45,7 +45,7 @@ uv run python setup.py
 # Or individually
 uv run python setup.py --asr-only   # Typhoon ASR (.nemo)
 uv run python setup.py --nmt-only   # NLLB-600M INT8 (CTranslate2)
-uv run python setup.py --tts-only   # Kokoro-82M ONNX
+uv run python setup.py --tts-only   # Kokoro-82M ONNX (GitHub releases)
 ```
 
 ---
@@ -120,6 +120,7 @@ Input: real Thai speech. Output: English audio. No intermediate text used for sc
 |--------|-----------------|
 | BLEU | Translation accuracy (Whisper transcribes output audio → compare to FLEURS English ref) |
 | chrF | Character-level translation accuracy (better for morphology) |
+| UTMOS | Automated speech naturalness MOS (1–5 scale) via UTMOS22 |
 | RTF | Real-time factor — total latency / input audio duration |
 | Latency p50/p95 | Per-sample pipeline wall time |
 
@@ -127,6 +128,7 @@ Input: real Thai speech. Output: English audio. No intermediate text used for sc
 
 ```bash
 pip install datasets sacrebleu openai-whisper
+# UTMOS22 downloads automatically via torch.hub on first run
 ```
 
 ### 2. Run
@@ -155,10 +157,13 @@ Translation quality  (Whisper(output_audio) vs FLEURS English ref)
   BLEU  : 18.34
   chrF  : 34.21
 
+Speech quality  (UTMOS22 on output audio, 1-5 scale)
+  UTMOS : 3.821
+
            mean      p50      p95
 ------------------------------------------
   Total    2.341s   2.198s   3.812s
-  RTF      0.487×   0.461×   0.762×
+  RTF      0.487x   0.461x   0.762x
 ============================================================
 ```
 
