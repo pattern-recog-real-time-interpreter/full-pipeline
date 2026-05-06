@@ -21,14 +21,16 @@ class TTSEngine:
         self._sample_rate: int = 24000
 
     def load(self) -> None:
+        import onnxruntime as ort
         from kokoro_onnx import Kokoro
 
         print(f"[TTS] Loading Kokoro from {self.config.tts_model_path} ...")
-        self._kokoro = Kokoro(
+        session = ort.InferenceSession(
             self.config.tts_model_path,
-            self.config.tts_voices_path,
             providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
         )
+        print(f"[TTS] ORT providers in use: {session.get_providers()}")
+        self._kokoro = Kokoro.from_session(session, self.config.tts_voices_path)
         print(f"[TTS] Warming up Kokoro ...")
         # Warm up to get the actual sample rate
         samples, sr = self._kokoro.create("hi", voice=self.config.tts_voice,
