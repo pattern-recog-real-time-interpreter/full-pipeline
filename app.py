@@ -150,4 +150,4 @@ with gr.Blocks(title="Thai → English Voice Translation") as demo:
 
 
 if __name__ == "__main__":
-    demo.launch(share=_args.share)
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=_args.share)
