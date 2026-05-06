@@ -55,6 +55,7 @@ class VADSegmenter:
             sampling_rate=self.config.sample_rate,
             min_silence_duration_ms=self.config.vad_min_silence_ms,
             min_speech_duration_ms=self.config.vad_min_speech_ms,
+            speech_pad_ms=200,
         )
         if not timestamps:
             return []
