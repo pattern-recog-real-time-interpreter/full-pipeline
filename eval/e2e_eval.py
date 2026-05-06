@@ -25,12 +25,30 @@ Usage:
     uv run python eval/e2e_eval.py [--n 100] [--device cpu] [--whisper-model small]
 """
 import argparse
+import csv
 import json
 import os
 import statistics
 import sys
 import tempfile
 
+import os
+import sys
+
+# --- WINDOWS FFMEG PATH INJECTION ---
+if sys.platform == "win32":
+    # The exact path to your Shared FFmpeg bin folder
+    ffmpeg_bin = r"C:\Users\nunx1\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg.Shared_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build-shared\bin"
+    
+    if os.path.exists(ffmpeg_bin):
+        # 1. Helps 'torchcodec' find the .dll files
+        os.add_dll_directory(ffmpeg_bin)
+        
+        # 2. Helps 'whisper' find the ffmpeg.exe command
+        os.environ["PATH"] = ffmpeg_bin + os.pathsep + os.environ["PATH"]
+    else:
+        print(f"CRITICAL: FFmpeg folder not found at {ffmpeg_bin}")
+# ------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import librosa
@@ -104,10 +122,34 @@ def main():
 
     utmos = load_utmos()
 
-    print("[eval] Fetching FLEURS th_th / en_us test splits ...")
-    ds_th = load_dataset("google/fleurs", "th_th", split="test", trust_remote_code=True)
-    ds_en = load_dataset("google/fleurs", "en_us", split="test", trust_remote_code=True)
-    en_by_id = {row["id"]: row["transcription"] for row in ds_en}
+    print("[eval] Fetching FLEURS th_th test split ...")
+    ds_th = load_dataset("google/fleurs", "th_th", split="test")
+
+    # Load English references: try local TSV first, then HuggingFace Hub.
+    # TSV columns: id<TAB>filename<TAB>transcription<TAB>...
+    # The 'id' column is the sentence ID matching row['id'] in th_th.
+    _LOCAL_EN_TSV = os.path.join(
+        os.path.dirname(__file__), "..", "data", "fleurs_en_us", "data", "en_us", "test.tsv"
+    )
+    en_refs_by_id: dict[int, str] = {}
+    print("[eval] Loading FLEURS en_us references (for BLEU/chrF) ...")
+    if os.path.exists(_LOCAL_EN_TSV):
+        with open(_LOCAL_EN_TSV, encoding="utf-8", newline="") as f:
+            for cols in csv.reader(f, delimiter="\t"):
+                if len(cols) >= 3:
+                    try:
+                        en_refs_by_id[int(cols[0])] = cols[2]
+                    except ValueError:
+                        pass
+        print(f"[eval] Loaded {len(en_refs_by_id)} en_us refs from local TSV. BLEU/chrF enabled.")
+    else:
+        try:
+            ds_en = load_dataset("google/fleurs", "en_us", split="test")
+            en_refs_by_id = {row["id"]: row["transcription"] for row in ds_en}
+            print(f"[eval] en_us loaded from Hub ({len(en_refs_by_id)} entries). BLEU/chrF enabled.")
+        except Exception as e:
+            print(f"[eval] WARNING: Could not load en_us ({e}).")
+            print("[eval] BLEU/chrF will be skipped. Only UTMOS will be computed.")
 
     n = min(args.n, len(ds_th))
 
@@ -116,9 +158,7 @@ def main():
     records:     list[dict] = []
 
     for i, row in enumerate(list(ds_th)[:n]):
-        en_ref_text = en_by_id.get(row["id"], "")
-        if not en_ref_text:
-            continue
+        en_ref_text = en_refs_by_id.get(row["id"], "")
 
         audio_in = np.array(row["audio"]["array"], dtype=np.float32)
         orig_sr  = row["audio"]["sampling_rate"]
@@ -139,8 +179,9 @@ def main():
         transcript = transcribe_audio(asr, result.audio_output, result.tts_sample_rate)
         mos = compute_utmos(utmos, result.audio_output, result.tts_sample_rate)
 
-        transcripts.append(transcript)
-        references.append(en_ref_text)
+        if en_ref_text:
+            transcripts.append(transcript)
+            references.append(en_ref_text)
 
         print(f"  Whisper : {transcript}")
         print(f"  Ref     : {en_ref_text}")
@@ -166,19 +207,25 @@ def main():
         print("No samples produced audio output.")
         return
 
-    bleu     = sacrebleu.corpus_bleu(transcripts, [references])
-    chrf     = sacrebleu.corpus_chrf(transcripts, [references])
     avg_mos  = statistics.mean(r["utmos"] for r in records)
     lat      = latency_stats([r["total_s"] for r in records])
     rtf      = latency_stats([r["rtf"]     for r in records])
+
+    has_bleu = len(transcripts) > 0 and len(references) > 0
+    bleu = sacrebleu.corpus_bleu(transcripts, [references]) if has_bleu else None
+    chrf = sacrebleu.corpus_chrf(transcripts, [references]) if has_bleu else None
 
     print("\n" + "=" * 60)
     print(f"Black-box E2E evaluation  (n={actual_n}, device={args.device})")
     print(f"Whisper model : {args.whisper_model}")
     print()
     print("Translation quality  (Whisper(output_audio) vs FLEURS English ref)")
-    print(f"  BLEU  : {bleu.score:.2f}")
-    print(f"  chrF  : {chrf.score:.2f}")
+    if has_bleu:
+        print(f"  BLEU  : {bleu.score:.2f}")
+        print(f"  chrF  : {chrf.score:.2f}")
+    else:
+        print("  BLEU  : N/A (en_us references unavailable)")
+        print("  chrF  : N/A (en_us references unavailable)")
     print()
     print("Speech quality  (UTMOS22 on output audio, 1-5 scale)")
     print(f"  UTMOS : {avg_mos:.3f}")
@@ -194,8 +241,8 @@ def main():
         json.dump({
             "n":        actual_n,
             "device":   args.device,
-            "bleu":     bleu.score,
-            "chrf":     chrf.score,
+            "bleu":     bleu.score if has_bleu else None,
+            "chrf":     chrf.score if has_bleu else None,
             "avg_utmos": avg_mos,
             "latency":  {"mean": lat["mean"], "p50": lat["p50"], "p95": lat["p95"]},
             "rtf":      {"mean": rtf["mean"], "p50": rtf["p50"], "p95": rtf["p95"]},
