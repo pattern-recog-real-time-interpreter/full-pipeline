@@ -24,7 +24,11 @@ class TTSEngine:
         from kokoro_onnx import Kokoro
 
         print(f"[TTS] Loading Kokoro from {self.config.tts_model_path} ...")
-        self._kokoro = Kokoro(self.config.tts_model_path, self.config.tts_voices_path)
+        self._kokoro = Kokoro(
+            self.config.tts_model_path,
+            self.config.tts_voices_path,
+            providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
         print(f"[TTS] Warming up Kokoro ...")
         # Warm up to get the actual sample rate
         samples, sr = self._kokoro.create("hi", voice=self.config.tts_voice,
