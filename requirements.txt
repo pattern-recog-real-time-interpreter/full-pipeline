@@ -10,6 +10,7 @@ ctranslate2>=4.0.0
 transformers>=4.40.0
 sentencepiece>=0.2.0
 kokoro-onnx>=0.4.0
+onnxruntime-gpu>=1.17.0
 torch>=2.2.0
 torchaudio>=2.2.0
 sounddevice>=0.4.6
